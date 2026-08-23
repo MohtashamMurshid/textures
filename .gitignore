@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local helper artifacts
+_push*
+_mcp*
+_update*
+_content*
+_payloads/
+scripts/decode*
+_*
