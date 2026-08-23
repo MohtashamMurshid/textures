@@ -24,12 +24,14 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
 
   const [filterId, setFilterId] = useState<FilterId>('characters');
   const [settings, setSettings] = useState<FilterSettings>(
     FILTER_PRESETS[0]!.settings,
   );
   const [hasImage, setHasImage] = useState(false);
+  const [imageEpoch, setImageEpoch] = useState(0);
   const [isSample, setIsSample] = useState(true);
   const [rendering, setRendering] = useState(false);
   const [hoverId, setHoverId] = useState<FilterId | null>(null);
@@ -61,6 +63,7 @@ export default function App() {
         imageRef.current = img;
         setHasImage(true);
         setIsSample(true);
+        setImageEpoch((n) => n + 1);
       } catch {
         if (!cancelled) setError('Could not load sample image');
       }
@@ -72,7 +75,13 @@ export default function App() {
 
   useEffect(() => {
     if (hasImage) void render();
-  }, [hasImage, render]);
+  }, [hasImage, imageEpoch, render]);
+
+  useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    };
+  }, []);
 
   const onSelectFilter = (id: FilterId) => {
     const preset = FILTER_PRESETS.find((p) => p.id === id);
@@ -89,10 +98,14 @@ export default function App() {
     const url = URL.createObjectURL(file);
     try {
       const img = await loadImage(url);
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = url;
       imageRef.current = img;
       setHasImage(true);
       setIsSample(false);
+      setImageEpoch((n) => n + 1);
     } catch {
+      URL.revokeObjectURL(url);
       setError('Failed to load image');
     }
   };
