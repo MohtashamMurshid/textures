@@ -4,6 +4,7 @@ export type FilterId =
   | 'dither'
   | 'poster-dither'
   | 'halftone'
+  | 'newsprint'
   | 'cobalt-grain'
   | 'denim-grain'
   | 'harbor-grain'

@@ -322,49 +322,109 @@ export function drawBraille(
   ctx.restore();
 }
 
-/** Halftone — angled newsprint dots on paper */
-export function drawHalftone(
+const LIME_PAPER: RGB = [188, 230, 56];
+const PROCESS_C: RGB = [0, 155, 210];
+const PROCESS_M: RGB = [214, 12, 112];
+const PROCESS_Y: RGB = [242, 214, 0];
+const PROCESS_K: RGB = [28, 26, 22];
+
+type DotScreen = {
+  ink: RGB;
+  angle: number;
+  amountOf: (rgb: RGB) => number;
+};
+
+const rgbToCmyk = (rgb: RGB) => {
+  const r = rgb[0] / 255;
+  const g = rgb[1] / 255;
+  const b = rgb[2] / 255;
+  const k = 1 - Math.max(r, g, b);
+  const d = Math.max(0.001, 1 - k);
+  return {
+    c: (1 - r - k) / d,
+    m: (1 - g - k) / d,
+    y: (1 - b - k) / d,
+    k,
+  };
+};
+
+function drawDotScreens(
   ctx: CanvasRenderingContext2D,
   img: ImageData,
   settings: FilterSettings,
+  paper: RGB,
+  screens: readonly DotScreen[],
 ) {
   const { width: w, height: h, data } = img;
   const s = scale(w, h);
   const cell = (6 + ((100 - settings.detail) / 100) * 16) * s;
   const intensity = settings.intensity / 100;
-  const ink: RGB = [28, 26, 22];
-  const angle = Math.PI / 4;
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-
-  ctx.save();
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.fillStyle = rgba(PAPER_BASE, intensity);
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = rgba(ink, intensity);
-
   const pad = Math.hypot(w, h) + cell;
   const cx0 = w / 2;
   const cy0 = h / 2;
-  for (let v = -pad; v <= pad; v += cell) {
-    for (let u = -pad; u <= pad; u += cell) {
-      const x = u * cos - v * sin + cx0;
-      const y = u * sin + v * cos + cy0;
-      if (x < -cell || x > w + cell || y < -cell || y > h + cell) continue;
-      const avg = applyContrastRGB(
-        blockAverage(data, w, h, x - cell / 2, y - cell / 2, cell, cell),
-        settings.contrast + 8,
-      );
-      const amount = clamp(1 - luma(avg) / 255, 0, 1);
-      if (amount <= 0.02) continue;
-      const r = Math.sqrt(amount / Math.PI) * cell * 0.92;
-      if (r < 0.35) continue;
-      ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fill();
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = rgba(paper, intensity);
+  ctx.fillRect(0, 0, w, h);
+
+  for (const screen of screens) {
+    const cos = Math.cos(screen.angle);
+    const sin = Math.sin(screen.angle);
+    ctx.fillStyle = rgba(screen.ink, intensity);
+    for (let v = -pad; v <= pad; v += cell) {
+      for (let u = -pad; u <= pad; u += cell) {
+        const x = u * cos - v * sin + cx0;
+        const y = u * sin + v * cos + cy0;
+        if (x < -cell || x > w + cell || y < -cell || y > h + cell) continue;
+        const avg = applyContrastRGB(
+          blockAverage(data, w, h, x - cell / 2, y - cell / 2, cell, cell),
+          settings.contrast + 8,
+        );
+        const amount = clamp(screen.amountOf(avg), 0, 1);
+        if (amount <= 0.02) continue;
+        const r = Math.sqrt(amount / Math.PI) * cell * 0.92;
+        if (r < 0.35) continue;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
   ctx.restore();
+}
+
+/** Halftone — CMYK angled screens on lime paper */
+export function drawHalftone(
+  ctx: CanvasRenderingContext2D,
+  img: ImageData,
+  settings: FilterSettings,
+) {
+  drawDotScreens(ctx, img, settings, LIME_PAPER, [
+    { ink: PROCESS_Y, angle: 0, amountOf: (rgb) => rgbToCmyk(rgb).y },
+    { ink: PROCESS_C, angle: (15 * Math.PI) / 180, amountOf: (rgb) => rgbToCmyk(rgb).c },
+    { ink: PROCESS_M, angle: (75 * Math.PI) / 180, amountOf: (rgb) => rgbToCmyk(rgb).m },
+    {
+      ink: PROCESS_K,
+      angle: Math.PI / 4,
+      amountOf: (rgb) => rgbToCmyk(rgb).k * 0.72,
+    },
+  ]);
+}
+
+/** Newsprint — monochrome round-dot screen */
+export function drawNewsprint(
+  ctx: CanvasRenderingContext2D,
+  img: ImageData,
+  settings: FilterSettings,
+) {
+  drawDotScreens(ctx, img, settings, PAPER_BASE, [
+    {
+      ink: PROCESS_K,
+      angle: Math.PI / 4,
+      amountOf: (rgb) => 1 - luma(rgb) / 255,
+    },
+  ]);
 }
 
 /** Isoform — isometric voxel diamonds */
@@ -447,6 +507,10 @@ export function applyCanvasFilter(
   }
   if (id === 'halftone') {
     drawHalftone(ctx, img, settings);
+    return;
+  }
+  if (id === 'newsprint') {
+    drawNewsprint(ctx, img, settings);
     return;
   }
   drawGlyphField(ctx, img, settings, id);
