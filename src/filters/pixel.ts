@@ -326,16 +326,17 @@ const POSTER_INK: RGB = [18, 42, 24];
 export function flutedGlass(img: ImageData, settings: FilterSettings): Uint8ClampedArray {
   const out = new Uint8ClampedArray(img.data.length);
   const { width: w, height: h, data } = img;
-  const ribCount = 10 + Math.round((settings.detail / 100) * 54);
+  const ribCount = 8 + Math.round((settings.detail / 100) * 40);
   const ribW = Math.max(2, w / ribCount);
-  const amp = (settings.intensity / 100) * ribW * 0.9;
+  const amp = (settings.intensity / 100) * ribW * 1.05;
 
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
       const t = (((x % ribW) + ribW) % ribW) / ribW;
-      const src = samplePixelBilinear(data, w, h, x + Math.sin(t * Math.PI * 2) * amp, y);
-      const seam = Math.min(t, 1 - t) < 0.045 ? -10 : 0;
-      const ridge = Math.cos(t * Math.PI * 2) * 7 * (settings.intensity / 100);
+      const n = t * 2 - 1;
+      const src = samplePixelBilinear(data, w, h, x + Math.sin(n * Math.PI * 0.5) * amp, y);
+      const seam = Math.min(t, 1 - t) < 0.04 ? -14 : 0;
+      const ridge = (0.5 - Math.abs(n)) * 10 * (settings.intensity / 100);
       const fx: RGB = src.map((v) => clamp(contrast(v, settings.contrast) + seam + ridge)) as RGB;
       const i = (y * w + x) * 4;
       blendIntensity(
