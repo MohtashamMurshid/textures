@@ -12,6 +12,7 @@ import {
   multiplyInk,
   orderedQuantize,
   samplePixel,
+  samplePixelBilinear,
   scale,
   toUnit,
   valueNoise,
@@ -318,6 +319,109 @@ export function inkWash(img: ImageData, settings: FilterSettings): Uint8ClampedA
   return out;
 }
 
+const POSTER_PAPER: RGB = [196, 232, 62];
+const POSTER_INK: RGB = [18, 42, 24];
+
+/** Fluted — vertical cylindrical-lens ribs */
+export function flutedGlass(img: ImageData, settings: FilterSettings): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(img.data.length);
+  const { width: w, height: h, data } = img;
+  const ribCount = 8 + Math.round((settings.detail / 100) * 40);
+  const ribW = Math.max(2, w / ribCount);
+  const amp = (settings.intensity / 100) * ribW * 1.05;
+
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const t = (((x % ribW) + ribW) % ribW) / ribW;
+      const n = t * 2 - 1;
+      const src = samplePixelBilinear(data, w, h, x + Math.sin(n * Math.PI * 0.5) * amp, y);
+      const seam = Math.min(t, 1 - t) < 0.04 ? -14 : 0;
+      const ridge = (0.5 - Math.abs(n)) * 10 * (settings.intensity / 100);
+      const fx: RGB = src.map((v) => clamp(contrast(v, settings.contrast) + seam + ridge)) as RGB;
+      const i = (y * w + x) * 4;
+      blendIntensity(
+        out,
+        i,
+        [data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0],
+        fx,
+        settings.intensity,
+      );
+    }
+  }
+  return out;
+}
+
+/** Water — multi-frequency ripple displacement */
+export function water(img: ImageData, settings: FilterSettings): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(img.data.length);
+  const { width: w, height: h, data } = img;
+  const s = scale(w, h);
+  const freq = (0.01 + (settings.detail / 100) * 0.05) / s;
+  const amp = (settings.intensity / 100) * 20 * s;
+  const fringe = (settings.intensity / 100) * 1.6 * s;
+
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const dx =
+        Math.sin(y * freq * 1.65 + x * freq * 0.32) * amp +
+        Math.sin(y * freq * 0.52 + 1.4) * amp * 0.42 +
+        Math.sin((x + y) * freq * 0.26) * amp * 0.2;
+      const dy =
+        Math.cos(x * freq * 1.35 + y * freq * 0.38) * amp * 0.7 +
+        Math.sin(x * freq * 0.58 + 0.8) * amp * 0.36;
+      const r = samplePixelBilinear(data, w, h, x + dx + fringe, y + dy);
+      const g = samplePixelBilinear(data, w, h, x + dx, y + dy);
+      const b = samplePixelBilinear(data, w, h, x + dx - fringe, y + dy);
+      const fx: RGB = [r[0], g[1], b[2]].map((v) => contrast(v, settings.contrast)) as RGB;
+      const i = (y * w + x) * 4;
+      blendIntensity(
+        out,
+        i,
+        [data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0],
+        fx,
+        settings.intensity,
+      );
+    }
+  }
+  return out;
+}
+
+/** Poster Dither — coarse 2–4 tone Bayer, lime paper */
+export function posterDither(img: ImageData, settings: FilterSettings): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(img.data.length);
+  const s = scale(img.width, img.height);
+  const step = Math.max(3, Math.round((6 + ((100 - settings.detail) / 100) * 16) * s));
+  const levels = settings.detail > 72 ? 4 : settings.detail > 38 ? 3 : 2;
+
+  for (let y = 0; y < img.height; y += step) {
+    for (let x = 0; x < img.width; x += step) {
+      const i = (y * img.width + x) * 4;
+      const sample: RGB = [img.data[i] ?? 0, img.data[i + 1] ?? 0, img.data[i + 2] ?? 0];
+      const t =
+        ((BAYER_8[(Math.floor(y / step) % 8) * 8 + (Math.floor(x / step) % 8)] ?? 0) + 0.5) / 64;
+      const q = orderedQuantize(contrast(luma(sample), settings.contrast), t, levels) / 255;
+      const fx: RGB = [
+        POSTER_INK[0] * (1 - q) + POSTER_PAPER[0] * q,
+        POSTER_INK[1] * (1 - q) + POSTER_PAPER[1] * q,
+        POSTER_INK[2] * (1 - q) + POSTER_PAPER[2] * q,
+      ];
+      for (let py = y; py < Math.min(y + step, img.height); py += 1) {
+        for (let px = x; px < Math.min(x + step, img.width); px += 1) {
+          const j = (py * img.width + px) * 4;
+          blendIntensity(
+            out,
+            j,
+            [img.data[j] ?? 0, img.data[j + 1] ?? 0, img.data[j + 2] ?? 0],
+            fx,
+            settings.intensity,
+          );
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /** Cyanotype — deep blue → highlight grade */
 export function cyanotype(img: ImageData, settings: FilterSettings): Uint8ClampedArray {
   const out = new Uint8ClampedArray(img.data.length);
@@ -356,6 +460,9 @@ export const PIXEL_FILTERS = new Set<FilterId>([
   'meadow-grain',
   'paper',
   'watercolor',
+  'water',
+  'fluted-glass',
+  'poster-dither',
   'ink-wash',
   'cyanotype',
 ]);
@@ -379,6 +486,12 @@ export function applyPixelFilter(
       return paper(img, settings);
     case 'watercolor':
       return watercolor(img, settings);
+    case 'water':
+      return water(img, settings);
+    case 'fluted-glass':
+      return flutedGlass(img, settings);
+    case 'poster-dither':
+      return posterDither(img, settings);
     case 'ink-wash':
       return inkWash(img, settings);
     case 'cyanotype':

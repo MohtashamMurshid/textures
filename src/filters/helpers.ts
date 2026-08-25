@@ -114,6 +114,30 @@ export const samplePixel = (
   return [data[i] ?? 0, data[i + 1] ?? 0, data[i + 2] ?? 0];
 };
 
+export const samplePixelBilinear = (
+  data: Uint8ClampedArray,
+  w: number,
+  h: number,
+  x: number,
+  y: number,
+): RGB => {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const fx = x - x0;
+  const fy = y - y0;
+  const a = samplePixel(data, w, h, x0, y0);
+  const b = samplePixel(data, w, h, x0 + 1, y0);
+  const c = samplePixel(data, w, h, x0, y0 + 1);
+  const d = samplePixel(data, w, h, x0 + 1, y0 + 1);
+  return [0, 1, 2].map(
+    (ch) =>
+      (a[ch] ?? 0) * (1 - fx) * (1 - fy) +
+      (b[ch] ?? 0) * fx * (1 - fy) +
+      (c[ch] ?? 0) * (1 - fx) * fy +
+      (d[ch] ?? 0) * fx * fy,
+  ) as RGB;
+};
+
 export const blockAverage = (
   data: Uint8ClampedArray,
   w: number,
