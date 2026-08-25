@@ -1,7 +1,8 @@
-import type { FilterId, FilterSettings } from './types';
+import type { FilterId, FilterSettings, RGB } from './types';
 import {
   BAYER_8,
   GLYPH_CHARS,
+  PAPER_BASE,
   applyContrastRGB,
   blockAverage,
   clamp,
@@ -321,6 +322,51 @@ export function drawBraille(
   ctx.restore();
 }
 
+/** Halftone — angled newsprint dots on paper */
+export function drawHalftone(
+  ctx: CanvasRenderingContext2D,
+  img: ImageData,
+  settings: FilterSettings,
+) {
+  const { width: w, height: h, data } = img;
+  const s = scale(w, h);
+  const cell = (6 + ((100 - settings.detail) / 100) * 16) * s;
+  const intensity = settings.intensity / 100;
+  const ink: RGB = [28, 26, 22];
+  const angle = Math.PI / 4;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = rgba(PAPER_BASE, intensity);
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = rgba(ink, intensity);
+
+  const pad = Math.hypot(w, h) + cell;
+  const cx0 = w / 2;
+  const cy0 = h / 2;
+  for (let v = -pad; v <= pad; v += cell) {
+    for (let u = -pad; u <= pad; u += cell) {
+      const x = u * cos - v * sin + cx0;
+      const y = u * sin + v * cos + cy0;
+      if (x < -cell || x > w + cell || y < -cell || y > h + cell) continue;
+      const avg = applyContrastRGB(
+        blockAverage(data, w, h, x - cell / 2, y - cell / 2, cell, cell),
+        settings.contrast + 8,
+      );
+      const amount = clamp(1 - luma(avg) / 255, 0, 1);
+      if (amount <= 0.02) continue;
+      const r = Math.sqrt(amount / Math.PI) * cell * 0.92;
+      if (r < 0.35) continue;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
 /** Isoform — isometric voxel diamonds */
 export function drawVoxel(
   ctx: CanvasRenderingContext2D,
@@ -397,6 +443,10 @@ export function applyCanvasFilter(
   }
   if (id === 'dot-cross') {
     drawDotCross(ctx, img, settings);
+    return;
+  }
+  if (id === 'halftone') {
+    drawHalftone(ctx, img, settings);
     return;
   }
   drawGlyphField(ctx, img, settings, id);
